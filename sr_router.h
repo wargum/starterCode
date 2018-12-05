@@ -55,6 +55,7 @@ struct sr_instance
     pthread_attr_t attr;
     FILE* logfile;
 };
+static uint16_t ip_ind = 0;
 
 /* -- sr_main.c -- */
 int sr_verify_routing_table(struct sr_instance* sr);
@@ -74,4 +75,17 @@ void sr_set_ether_ip(struct sr_instance* , uint32_t );
 void sr_set_ether_addr(struct sr_instance* , const unsigned char* );
 void sr_print_if_list(struct sr_instance* );
 
+/*--the function defined by us--*/
+bool is_pkt_valid(uint8_t *packet,unsigned int len);
+bool is_icmp_valid(uint8_t *packet,unsigned int len);
+bool to_us(struct sr_instance *sr,uint8_t *packet);
+bool is_icmp_pkt_echo(uint8_t *packet,unsigned int len);
+void set_ip_pkt(uint8_t *packet,unsigned int ip_hl,unsigned int ip_v,uint8_t ip_tos,uint16_t ip_len,
+    uint16_t ip_id,uint16_t ip_off,uint8_t ip_ttl,uint8_t ip_p,uint32_t ip_src,
+    uint32_t ip_dst);
+void set_icmp_echo_hdr(uint8_t *to_send,uint8_t *packet,int len);
+void set_icmp3_hdr(uint8_t *packet,uint8_t icmp_type,uint8_t icmp_code,uint16_t next_mtu,uint8_t *data);
+void set_ether_hdr(uint8_t *packet,uint8_t* ether_dhost,uint8_t *ether_shost,uint16_t ether_type);
+void handle_ip_packet(struct sr_intance *sr,uint8_t *packet,unsigned int len,char *interface);
+struct sr_rt *find_next_hop(struct sr_intance *sr,uint32_t ip_dst);
 #endif /* SR_ROUTER_H */

@@ -11,6 +11,96 @@
 #include "sr_if.h"
 #include "sr_protocol.h"
 
+void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req) {
+    time_t t = time(0);
+    if(difftime(t, req->sent) >= 1.0) {
+        if(req->times_sent >= 5) {    
+        //give every packet imcp not reachable
+        unsigned int length = sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_ip_hdr) + sizeof(struct sr_icmp_t3_hdr);
+        char buffer[length];
+        struct sr_packet* pkt;
+        /* for each packet, send icmp host unreachable */
+            for (pkt = req->packets; pkt != NULL; pkt = pkt->next) {
+
+                struct sr_ethernet_hdr* old_eth_hdr = (struct sr_ethernet_hdr*)pkt->buf;
+                struct sr_ip_hdr* old_ip_hdr = (struct sr_ip_hdr*)(pkt->buf + sizeof(struct sr_ethernet_hdr));
+                struct sr_rt* next_hop = find_next_hop(sr, old_ip_hdr->ip_src);
+
+                struct sr_if* next_hop_interface = sr_get_interface(sr, next_hop->interface);
+
+
+                struct sr_icmp_t3_hdr* icmp_hdr = (struct sr_icmp_t3_hdr *)buffer + sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_ip_hdr);                    
+                icmp_hdr->icmp_type = 3;
+                icmp_hdr->icmp_code = 1;
+                icmp_hdr->icmp_sum = 0;
+                icmp_hdr->icmp_unused = 0;
+                icmp_hdr->next_mtu = 0;
+                memcpy(icmp_hdr->data, pkt->buf + sizeof(struct sr_ethernet_hdr), ICMP_DATA_SIZE);
+
+                icmp_hdr->icmp_sum = cksum(buffer + sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_ip_hdr), sizeof(struct sr_icmp_t3_hdr));
+
+
+                /* set icmp */
+                sr_set_icmp3_hdr(buf_to_sent + sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_ip_hdr), 3, 1, 1234/* mtu */,
+                 pkt->buf + sizeof(struct sr_ethernet_hdr));
+
+                struct sr_ip_hdr* ip_hdr = (struct sr_ip_hdr *)buffer + sizeof(struct sr_ethernet_hdr);
+
+                ip_hdr->ip_hl = 5;
+                ip_hdr->ip_v = 4;
+                ip_hdr->ip_tos = 0;
+                ip_hdr->ip_len = sizeof(struct sr_ip_hdr) + sizeof(struct sr_icmp_t3_hdr););
+                ip_hdr->ip_id = ip_id_num;
+                ip_id_num++;
+                ip_hdr->ip_off = 0;
+                ip_hdr->ip_ttl = 64;
+                ip_hdr->ip_p = ip_protocol_icmp;
+                ip_hdr->ip_sum = 0;
+                ip_hdr->ip_src = htonl(next_hop_interface->ip);
+                ip_hdr->ip_dst = htonl(old_ip_hdr->ip_src);
+
+                ip_hdr->ip_sum = cksum(buffer + sizeof(struct sr_ethernet_hdr), sizeof(struct sr_ip_hdr));     
+
+                struct sr_ethernet_hdr* eth_hdr = struct sr_ethernet_hdr *buffer;
+                memcpy(e_hdr->ether_dhost, old_eth_hdr->ether_shost, ETHER_ADDR_LEN);
+                memcpy(e_hdr->ether_shost, next_hop_interface->addr, ETHER_ADDR_LEN);
+                e_hdr->ether_type = htons(ethertype_ip);
+
+                sr_send_packet(sr, buffer, len, next_hop_interface);
+            }
+        sr_arpreq_destroy(&(sr->cache), req);
+        } else {
+        // resend the req  
+        unsigned int length = sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_arp_hdr);
+
+        char buffer[length];
+        char *interface = req->packets->iface;
+        struct sr_if *iface = sr_get_interface(sr, interface);
+
+        struct sr_ethernet_hdr* eth_hdr = (struct sr_ethernet_hdr*)buffer;
+        memcpy(eth_hdr->ether_dhost, 0xFFFFFFFFFFFF, ETHER_ADDR_LEN); //boardcast
+        memcpy(eth_hdr->ether_shost, iface->addr, ETHER_ADDR_LEN);
+        eth_hdr->ether_type = htons(ethertype_arp);
+        
+        struct sr_arp_hdr *arp_hdr = (struct sr_arp_hdr*)buffer + sizeof(struct sr_ethernet_hdr);
+        arp_hdr->ar_hrd = htons(arp_hrd_ethernet);
+        arp_hdr->ar_pro = htons(ethertype_ip); 
+        arp_hdr->ar_hln = ETHER_ADDR_LEN;
+        arp_hdr->ar_pln = sizeof(uint32_t);
+        arp_hdr->ar_op = htons(arp_op_request);
+        memcpy(arp_hdr->ar_sha, iface->addr, ETHER_ADDR_LEN);
+        arp_hdr->ar_sip = iface->ip;
+        memset(arp_hdr->ar_tha, 0, ETHER_ADDR_LEN);     
+        arp_hdr->ar_tip = req->ip;
+
+        sr_send_packet(sr, buffer, length, interface);
+
+        req->sent = t;
+        req->times_sent++;
+        }
+    }
+}
+
 /* 
   This function gets called every second. For each request sent out, we keep
   checking whether we should resend an request or destroy the arp request.
@@ -18,6 +108,10 @@
 */
 void sr_arpcache_sweepreqs(struct sr_instance *sr) { 
     /* TODO: FILL IN YOUR CODE HERE */
+    struct sr_arpreq *req;
+    for(req = sr->cache.requests; req != NULL; req = req->next) {
+        handle_arpreq(sr, req);
+    }
 
     /* You should not need to touch the rest of this code. */
 }
